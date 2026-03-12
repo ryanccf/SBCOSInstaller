@@ -62,7 +62,8 @@ def get_output_name():
 
 
 def build():
-    if not _in_venv():
+    # Skip venv in CI — dependencies are already installed globally
+    if not _in_venv() and not os.environ.get("CI"):
         _relaunch_in_venv()
 
     ensure_pyinstaller()
@@ -95,8 +96,11 @@ def build():
     ]:
         cmd += ["--hidden-import", module]
 
-    # Use icon for the binary (Windows .ico / Linux embedded)
-    icon_file = ROOT / "icon.png"
+    # Use icon for the binary — Windows needs .ico, Linux uses .png
+    if platform.system() == "Windows":
+        icon_file = ROOT / "resources" / "icon.ico"
+    else:
+        icon_file = ROOT / "resources" / "icon.png"
     if icon_file.exists():
         cmd += ["--icon", str(icon_file)]
 
