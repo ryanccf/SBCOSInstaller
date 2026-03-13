@@ -24,6 +24,8 @@ VENV_DIR = ROOT / ".venv"
 KEEP_ICON_THEMES = {"hicolor", "Adwaita"}
 KEEP_GTK_THEMES = {"Adwaita", "Default"}
 
+IS_CI = bool(os.environ.get("CI"))
+
 
 def _in_venv():
     return sys.prefix != sys.base_prefix
@@ -102,19 +104,54 @@ def get_output_name():
         return f"SBCOSInstaller-{machine}"
 
 
-def _write_spec(output_name):
-    """Generate a .spec file that strips icon/theme/locale bloat."""
+def _p(path):
+    """Return a forward-slash path string safe for embedding in spec files."""
+    return str(path).replace("\\", "/")
+
+
+def _build_cli(output_name):
+    """Build using PyInstaller CLI — used in CI where the system is minimal."""
     separator = ";" if platform.system() == "Windows" else ":"
+
+    cmd = [
+        sys.executable, "-m", "PyInstaller",
+        "--onefile",
+        "--name", output_name,
+        "--noconfirm",
+        "--clean",
+    ]
+
+    if (ROOT / "resources").is_dir():
+        cmd += ["--add-data", f"resources{separator}resources"]
+
+    for module in [
+        "gi", "gi.repository.Gtk", "gi.repository.Gdk",
+        "gi.repository.GdkPixbuf", "gi.repository.GLib",
+        "gi.repository.Pango",
+    ]:
+        cmd += ["--hidden-import", module]
+
+    if platform.system() == "Windows":
+        icon_file = ROOT / "resources" / "icon.ico"
+        if icon_file.exists():
+            cmd += ["--icon", str(icon_file)]
+
+    cmd.append("main.py")
+    return cmd
+
+
+def _build_spec(output_name):
+    """Build using a spec file — used locally to strip desktop bloat."""
 
     add_data = ""
     if (ROOT / "resources").is_dir():
-        add_data = f"('{ROOT / 'resources'}', 'resources'),"
+        add_data = f"(r'{_p(ROOT / 'resources')}', 'resources'),"
 
     icon_line = ""
     if platform.system() == "Windows":
         icon_file = ROOT / "resources" / "icon.ico"
         if icon_file.exists():
-            icon_line = f"icon='{icon_file}',"
+            icon_line = f"icon=r'{_p(icon_file)}',"
 
     keep_icons = repr(KEEP_ICON_THEMES)
     keep_themes = repr(KEEP_GTK_THEMES)
@@ -126,8 +163,8 @@ def _write_spec(output_name):
         import glob
 
         a = Analysis(
-            ['{ROOT / "main.py"}'],
-            pathex=['{ROOT}'],
+            [r'{_p(ROOT / "main.py")}'],
+            pathex=[r'{_p(ROOT)}'],
             hiddenimports=[
                 'gi', 'gi.repository.Gtk', 'gi.repository.Gdk',
                 'gi.repository.GdkPixbuf', 'gi.repository.GLib',
@@ -140,6 +177,7 @@ def _write_spec(output_name):
         # dynamically at runtime and missed by PyInstaller's import analysis.
         if sys.platform == 'win32':
             _gio_candidates = [
+                os.path.join(sys.prefix, 'lib', 'gio', 'modules'),
                 '/mingw64/lib/gio/modules',
                 os.path.join(os.environ.get('MSYSTEM_PREFIX', ''), 'lib', 'gio', 'modules'),
             ]
@@ -147,7 +185,6 @@ def _write_spec(output_name):
                 if os.path.isdir(_gio_dir):
                     for _f in glob.glob(os.path.join(_gio_dir, '*.dll')):
                         a.binaries.append((os.path.join('gio', 'modules', os.path.basename(_f)), _f, 'BINARY'))
-                    # Also include the module cache if present
                     _cache = os.path.join(_gio_dir, 'giomodule.cache')
                     if os.path.isfile(_cache):
                         a.datas.append((os.path.join('gio', 'modules', 'giomodule.cache'), _cache, 'DATA'))
@@ -185,27 +222,30 @@ def _write_spec(output_name):
 
     spec_path = ROOT / f"{output_name}.spec"
     spec_path.write_text(spec_content)
-    return spec_path
+    return [
+        sys.executable, "-m", "PyInstaller",
+        "--noconfirm", "--clean",
+        str(spec_path),
+    ]
 
 
 def build():
     # Skip venv in CI — dependencies are already installed globally
-    if not _in_venv() and not os.environ.get("CI"):
+    if not _in_venv() and not IS_CI:
         _relaunch_in_venv()
 
     ensure_pyinstaller()
 
     RELEASES_DIR.mkdir(exist_ok=True)
-
     output_name = get_output_name()
-    spec_path = _write_spec(output_name)
 
-    cmd = [
-        sys.executable, "-m", "PyInstaller",
-        "--noconfirm",
-        "--clean",
-        str(spec_path),
-    ]
+    # Windows always uses spec (needs GIO modules bundled).
+    # Linux CI uses simple CLI (minimal system, no bloat to strip).
+    # Linux local uses spec to strip desktop icon/theme bloat.
+    if platform.system() == "Windows" or not IS_CI:
+        cmd = _build_spec(output_name)
+    else:
+        cmd = _build_cli(output_name)
 
     print(f"Building {output_name}...")
     subprocess.check_call(cmd, cwd=str(ROOT))
@@ -220,7 +260,8 @@ def build():
     for d in (ROOT / "build", ROOT / "dist"):
         if d.exists():
             shutil.rmtree(d)
-    spec_path.unlink(missing_ok=True)
+    for spec in ROOT.glob("*.spec"):
+        spec.unlink()
 
     print(f"Build complete: {dest}")
     print(f"Size: {dest.stat().st_size / (1024 * 1024):.1f} MB")
