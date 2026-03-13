@@ -131,7 +131,7 @@ def _build_cli(output_name):
     ]:
         cmd += ["--hidden-import", module]
 
-    # On Windows, bundle GIO platform modules (loaded dynamically at runtime).
+    # On Windows, bundle GIO platform modules and typelibs (loaded dynamically).
     if platform.system() == "Windows":
         for gio_dir in [
             Path(sys.prefix) / "lib" / "gio" / "modules",
@@ -143,6 +143,16 @@ def _build_cli(output_name):
                 cache = gio_dir / "giomodule.cache"
                 if cache.exists():
                     cmd += ["--add-data", f"{cache}{separator}gio/modules"]
+                break
+
+        # Bundle GioWin32 typelib to avoid "namespace 'GioWin32' not found"
+        for typelib_dir in [
+            Path(sys.prefix) / "lib" / "girepository-1.0",
+            Path("/mingw64/lib/girepository-1.0"),
+        ]:
+            if typelib_dir.is_dir():
+                for typelib in typelib_dir.glob("GioWin32*.typelib"):
+                    cmd += ["--add-data", f"{typelib}{separator}gi_typelibs"]
                 break
 
         icon_file = ROOT / "resources" / "icon.ico"

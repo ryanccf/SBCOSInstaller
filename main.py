@@ -9,6 +9,7 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, Pango
 
 import os
+import platform
 import sys
 import threading
 import shutil
@@ -1190,6 +1191,9 @@ class ReleasePicker(Gtk.Dialog):
 
 def check_dependencies():
     """Check for required system tools and offer to install missing ones."""
+    if platform.system() == "Windows":
+        return True
+
     REQUIRED_TOOLS = {
         "parted":    "parted",
         "mkfs.vfat": "dosfstools",
