@@ -232,27 +232,27 @@ def decompress_image(
         raise RuntimeError("No .img file found after 7z extraction")
 
     elif name.endswith('.img.xz'):
+        import lzma
         img_name = name[:-3]  # strip .xz
         img_path = dest_dir / img_name
-        with open(img_path, 'wb') as out_f:
-            result = subprocess.run(
-                ["xz", "-dc", str(compressed_path)],
-                stdout=out_f, stderr=subprocess.PIPE, timeout=3600,
-            )
-        if result.returncode != 0:
-            raise RuntimeError(f"xz decompression failed: {result.stderr.decode()}")
+        with lzma.open(compressed_path, 'rb') as src, open(img_path, 'wb') as dst:
+            while True:
+                chunk = src.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                dst.write(chunk)
         return img_path
 
     elif name.endswith('.img.gz'):
+        import gzip
         img_name = name[:-3]  # strip .gz
         img_path = dest_dir / img_name
-        with open(img_path, 'wb') as out_f:
-            result = subprocess.run(
-                ["gunzip", "-c", str(compressed_path)],
-                stdout=out_f, stderr=subprocess.PIPE, timeout=3600,
-            )
-        if result.returncode != 0:
-            raise RuntimeError(f"gunzip decompression failed: {result.stderr.decode()}")
+        with gzip.open(compressed_path, 'rb') as src, open(img_path, 'wb') as dst:
+            while True:
+                chunk = src.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                dst.write(chunk)
         return img_path
 
     else:

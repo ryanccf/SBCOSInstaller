@@ -439,27 +439,27 @@ class TestDecompressImage:
         with pytest.raises(ValueError, match="Unsupported"):
             decompress_image(bad_file, tmp_path)
 
-    @patch("subprocess.run")
-    def test_gz_decompression(self, mock_run, tmp_path):
+    def test_gz_decompression(self, tmp_path):
+        import gzip
         compressed = tmp_path / "image.img.gz"
-        compressed.write_bytes(b"fake gz")
-        mock_run.return_value = MagicMock(returncode=0)
+        img_data = b"\x00" * 1024
+        with gzip.open(compressed, 'wb') as f:
+            f.write(img_data)
 
         result = decompress_image(compressed, tmp_path)
         assert result == tmp_path / "image.img"
-        mock_run.assert_called_once()
-        assert "gunzip" in mock_run.call_args[0][0]
+        assert result.read_bytes() == img_data
 
-    @patch("subprocess.run")
-    def test_xz_decompression(self, mock_run, tmp_path):
+    def test_xz_decompression(self, tmp_path):
+        import lzma
         compressed = tmp_path / "image.img.xz"
-        compressed.write_bytes(b"fake xz")
-        mock_run.return_value = MagicMock(returncode=0)
+        img_data = b"\x00" * 1024
+        with lzma.open(compressed, 'wb') as f:
+            f.write(img_data)
 
         result = decompress_image(compressed, tmp_path)
         assert result == tmp_path / "image.img"
-        mock_run.assert_called_once()
-        assert "xz" in mock_run.call_args[0][0]
+        assert result.read_bytes() == img_data
 
     @patch("subprocess.run")
     def test_7z_decompression(self, mock_run, tmp_path):
@@ -473,10 +473,8 @@ class TestDecompressImage:
         result = decompress_image(compressed, tmp_path)
         assert result == tmp_path / "image.img"
 
-    @patch("subprocess.run")
-    def test_gz_failure(self, mock_run, tmp_path):
+    def test_gz_failure(self, tmp_path):
         compressed = tmp_path / "image.img.gz"
-        compressed.write_bytes(b"fake")
-        mock_run.return_value = MagicMock(returncode=1, stderr=b"error")
-        with pytest.raises(RuntimeError, match="gunzip"):
+        compressed.write_bytes(b"not a real gzip file")
+        with pytest.raises(Exception):
             decompress_image(compressed, tmp_path)

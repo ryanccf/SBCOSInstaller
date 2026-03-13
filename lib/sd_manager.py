@@ -8,12 +8,24 @@ for supported retro handheld devices using native Linux tools.
 import json
 import logging
 import os
+import platform
 import re
 import shlex
 import shutil
 import subprocess
 
 logger = logging.getLogger(__name__)
+
+IS_WINDOWS = platform.system() == "Windows"
+
+
+def _require_linux(operation: str = "This operation"):
+    """Raise OSError if running on Windows."""
+    if IS_WINDOWS:
+        raise OSError(
+            f"{operation} requires Linux.\n"
+            f"On Windows, use a tool like Rufus or balenaEtcher for SD card operations."
+        )
 
 _SAFE_DEVICE_RE = re.compile(r"^/dev/[a-zA-Z0-9_]+$")
 _SAFE_LABEL_RE = re.compile(r"^[A-Z0-9_ ]{0,11}$")
@@ -46,6 +58,8 @@ def _tool(name: str) -> str:
 
 
 def _is_root() -> bool:
+    if IS_WINDOWS:
+        return False
     return os.geteuid() == 0
 
 
@@ -91,6 +105,10 @@ def _card_size_bytes(device: str) -> int:
 
 def list_removable_drives() -> list[dict]:
     """Enumerate removable drives visible to the system."""
+    if IS_WINDOWS:
+        logger.info("SD card detection is not supported on Windows")
+        return []
+
     result = _run([
         "lsblk", "-J", "-o",
         "NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,RM,MODEL,TRAN,LABEL",
@@ -140,6 +158,8 @@ def list_removable_drives() -> list[dict]:
 
 def get_drive_partitions(device: str) -> list[dict]:
     """Return a list of partitions for a device."""
+    if IS_WINDOWS:
+        return []
     device = _ensure_block_device(device)
 
     result = _run([
@@ -243,6 +263,7 @@ def format_sd_card(device: str, label: str = "SDCARD",
         Function that takes size_bytes and returns cluster sectors string.
         Defaults to "64" if not provided.
     """
+    _require_linux("Formatting SD cards")
     device = _ensure_block_device(device)
     _validate_device(device)
     label = (label or "SDCARD")[:11].upper()
@@ -302,6 +323,7 @@ udevadm settle --timeout=5
 
 def check_disk(partition: str) -> str:
     """Run a non-destructive filesystem check on a partition."""
+    _require_linux("Disk checking")
     partition = _ensure_block_device(partition)
 
     # Unmount if currently mounted
@@ -316,6 +338,7 @@ def check_disk(partition: str) -> str:
 
 def eject_drive(device: str) -> tuple[bool, str]:
     """Safely eject a device (unmount + power-off)."""
+    _require_linux("Ejecting drives")
     device = _ensure_block_device(device)
 
     partitions = get_drive_partitions(device)
@@ -342,6 +365,7 @@ def eject_drive(device: str) -> tuple[bool, str]:
 
 def mount_partition(partition: str) -> str | None:
     """Mount a partition via udisksctl and return the mount point."""
+    _require_linux("Mounting partitions")
     partition = _ensure_block_device(partition)
 
     res = _run(["udisksctl", "mount", "-b", partition])
@@ -361,6 +385,7 @@ def mount_partition(partition: str) -> str | None:
 
 def unmount_partition(partition: str) -> tuple[bool, str]:
     """Unmount a partition."""
+    _require_linux("Unmounting partitions")
     partition = _ensure_block_device(partition)
 
     res = _run(["udisksctl", "unmount", "-b", partition])
@@ -377,14 +402,15 @@ def unmount_partition(partition: str) -> tuple[bool, str]:
 def get_free_space(path: str) -> int:
     """Return the free space in bytes available at a path."""
     try:
-        st = os.statvfs(path)
-        return st.f_bavail * st.f_frsize
+        usage = shutil.disk_usage(path)
+        return usage.free
     except OSError:
         return 0
 
 
 def unmount_all_partitions(device: str) -> tuple[bool, str]:
     """Unmount all mounted partitions on a device."""
+    _require_linux("Unmounting partitions")
     device = _ensure_block_device(device)
     partitions = get_drive_partitions(_device_basename(device))
     failed = []
@@ -410,6 +436,7 @@ def write_image_to_device(
     Unmounts all partitions first, then writes with dd via pkexec.
     Returns (success, message).
     """
+    _require_linux("Writing disk images")
     device = _ensure_block_device(device)
     _validate_device(device)
 
