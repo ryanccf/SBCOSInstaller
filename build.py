@@ -131,7 +131,20 @@ def _build_cli(output_name):
     ]:
         cmd += ["--hidden-import", module]
 
+    # On Windows, bundle GIO platform modules (loaded dynamically at runtime).
     if platform.system() == "Windows":
+        for gio_dir in [
+            Path(sys.prefix) / "lib" / "gio" / "modules",
+            Path("/mingw64/lib/gio/modules"),
+        ]:
+            if gio_dir.is_dir():
+                for dll in gio_dir.glob("*.dll"):
+                    cmd += ["--add-binary", f"{dll}{separator}gio/modules"]
+                cache = gio_dir / "giomodule.cache"
+                if cache.exists():
+                    cmd += ["--add-data", f"{cache}{separator}gio/modules"]
+                break
+
         icon_file = ROOT / "resources" / "icon.ico"
         if icon_file.exists():
             cmd += ["--icon", str(icon_file)]
@@ -239,13 +252,12 @@ def build():
     RELEASES_DIR.mkdir(exist_ok=True)
     output_name = get_output_name()
 
-    # Windows always uses spec (needs GIO modules bundled).
-    # Linux CI uses simple CLI (minimal system, no bloat to strip).
-    # Linux local uses spec to strip desktop icon/theme bloat.
-    if platform.system() == "Windows" or not IS_CI:
-        cmd = _build_spec(output_name)
-    else:
+    # CI uses CLI (minimal system, no bloat to strip, simpler for MSYS2).
+    # Local uses spec to strip desktop icon/theme/locale bloat.
+    if IS_CI:
         cmd = _build_cli(output_name)
+    else:
+        cmd = _build_spec(output_name)
 
     print(f"Building {output_name}...")
     subprocess.check_call(cmd, cwd=str(ROOT))
